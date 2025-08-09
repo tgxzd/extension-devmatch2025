@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DonateStream - Streamer Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        .gradient-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .gradient-green {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        .gradient-blue {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .animate-pulse-slow {
+            animation: pulse 2s ease-in-out infinite;
+        }
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        .notification-badge {
+            animation: bounce 1s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div x-data="streamerDashboard()" x-init="init()" class="min-h-screen">
+        <!-- Header -->
+        <header class="gradient-primary text-white shadow-lg sticky top-0 z-50">
+            <div class="container mx-auto px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-3xl">🎁</span>
+                        <h1 class="text-2xl font-bold">DonateStream Dashboard</h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="text-right">
+                            <div class="text-sm opacity-90">Total Donations</div>
+                            <div class="text-xl font-bold" x-text="'$' + totalAmount.toFixed(2)"></div>
+                        </div>
+                        <div class="relative">
+                            <span class="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center notification-badge" 
+                                  x-show="unreadCount > 0" 
+                                  x-text="unreadCount"></span>
+                            <button @click="toggleUnreadOnly()" 
+                                    class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition-all duration-200"
+                                    :class="{ 'bg-white/30': showUnreadOnly }">
+                                <span x-show="!showUnreadOnly">📬 Show Unread</span>
+                                <span x-show="showUnreadOnly">📭 Show All</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="container mx-auto px-6 py-8">
+            <!-- Streamer Selection -->
+            <div class="bg-white rounded-2xl shadow-lg p-6 mb-8">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">👤 Streamer Profile</h2>
+                <div class="flex flex-wrap gap-4 items-end">
+                    <div class="flex-1 min-w-64">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Streamer Name</label>
+                        <input type="text" 
+                               x-model="streamerName" 
+                               @keyup.enter="loadDonations()"
+                               placeholder="Enter your streamer name..."
+                               class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-all">
+                    </div>
+                    <div class="min-w-48">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Platform</label>
+                        <select x-model="platform" 
+                                class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none">
+                            <option value="">All Platforms</option>
+                            <option value="YouTube">YouTube</option>
+                            <option value="Twitch">Twitch</option>
+                        </select>
+                    </div>
+                    <button @click="loadDonations()" 
+                            :disabled="!streamerName.trim()"
+                            class="gradient-blue text-white px-6 py-3 rounded-xl font-semibold hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                        🔄 Load Donations
+                    </button>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div x-show="loading" class="text-center py-12">
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                <p class="mt-4 text-gray-600">Loading donations...</p>
+            </div>
+
+            <!-- Stats Cards -->
+            <div x-show="!loading && donations.length > 0" class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white rounded-2xl shadow-lg p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 font-medium">Total Donations</p>
+                            <p class="text-2xl font-bold text-gray-800" x-text="donations.length"></p>
+                        </div>
+                        <div class="bg-blue-100 p-3 rounded-xl">
+                            <span class="text-2xl">💝</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 font-medium">Total Amount</p>
+                            <p class="text-2xl font-bold text-green-600" x-text="'$' + totalAmount.toFixed(2)"></p>
+                        </div>
+                        <div class="bg-green-100 p-3 rounded-xl">
+                            <span class="text-2xl">💰</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 font-medium">Unread</p>
+                            <p class="text-2xl font-bold text-red-600" x-text="unreadCount"></p>
+                        </div>
+                        <div class="bg-red-100 p-3 rounded-xl">
+                            <span class="text-2xl">🔔</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 font-medium">With Messages</p>
+                            <p class="text-2xl font-bold text-purple-600" x-text="donationsWithMessages"></p>
+                        </div>
+                        <div class="bg-purple-100 p-3 rounded-xl">
+                            <span class="text-2xl">💬</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Bar -->
+            <div x-show="!loading && donations.length > 0" class="bg-white rounded-2xl shadow-lg p-4 mb-6">
+                <div class="flex flex-wrap gap-4 items-center justify-between">
+                    <div class="flex gap-4">
+                        <button @click="markAllAsRead()" 
+                                :disabled="unreadCount === 0"
+                                class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                            ✅ Mark All Read
+                        </button>
+                        <button @click="loadDonations()" 
+                                class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-all">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                    <div class="text-sm text-gray-600">
+                        Last updated: <span x-text="lastUpdated"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Donations List -->
+            <div x-show="!loading && donations.length > 0" class="space-y-4">
+                <template x-for="donation in filteredDonations" :key="donation.id">
+                    <div class="bg-white rounded-2xl shadow-lg p-6 card-hover"
+                         :class="{ 'border-l-4 border-blue-500 bg-blue-50': !donation.read }">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <div class="w-12 h-12 rounded-full gradient-primary flex items-center justify-center text-white font-bold text-lg">
+                                        <span x-text="donation.donorName.charAt(0).toUpperCase()"></span>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-gray-800" x-text="donation.donorName"></h3>
+                                        <div class="flex items-center gap-2 text-sm text-gray-600">
+                                            <span x-text="donation.streamerPlatform"></span>
+                                            <span>•</span>
+                                            <span x-text="formatDate(donation.timestamp)"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div x-show="donation.message" class="bg-gray-50 rounded-xl p-4 mb-3">
+                                    <p class="text-gray-700 leading-relaxed" x-text="donation.message"></p>
+                                </div>
+                                
+                                <div x-show="!donation.message" class="text-gray-500 italic mb-3">
+                                    No message included with this donation.
+                                </div>
+                            </div>
+                            
+                            <div class="flex flex-col items-end gap-3">
+                                <div class="text-right">
+                                    <div class="text-2xl font-bold text-green-600" x-text="'$' + donation.amount.toFixed(2)"></div>
+                                    <div class="text-sm text-gray-500">USDC</div>
+                                </div>
+                                
+                                <div class="flex gap-2">
+                                    <span x-show="!donation.read" 
+                                          class="bg-red-100 text-red-600 px-3 py-1 rounded-full text-xs font-semibold">
+                                        🔴 New
+                                    </span>
+                                    <button x-show="!donation.read" 
+                                            @click="markAsRead(donation.id)"
+                                            class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-semibold transition-all">
+                                        Mark Read
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Empty State -->
+            <div x-show="!loading && donations.length === 0" class="text-center py-12">
+                <div class="text-6xl mb-6">📭</div>
+                <h3 class="text-xl font-bold text-gray-800 mb-3">No donations found</h3>
+                <p class="text-gray-600 mb-6">
+                    <span x-show="!streamerName.trim()">Enter your streamer name above to load donations.</span>
+                    <span x-show="streamerName.trim()">No donations found for this streamer. Share your extension with viewers to start receiving donations!</span>
+                </p>
+                <button x-show="streamerName.trim()" 
+                        @click="loadDonations()" 
+                        class="gradient-blue text-white px-6 py-3 rounded-xl font-semibold hover:opacity-90 transition-all">
+                    🔄 Refresh
+                </button>
+            </div>
+
+            <!-- Error State -->
+            <div x-show="error" class="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
+                <div class="text-4xl mb-4">❌</div>
+                <h3 class="text-lg font-bold text-red-800 mb-2">Error Loading Donations</h3>
+                <p class="text-red-600 mb-4" x-text="error"></p>
+                <button @click="loadDonations()" 
+                        class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl font-semibold transition-all">
+                    Try Again
+                </button>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="bg-gray-800 text-white py-8 mt-12">
+            <div class="container mx-auto px-6 text-center">
+                <p class="text-gray-300">
+                    © 2024 DonateStream. Built with ❤️ for streamers and their communities.
+                </p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        function streamerDashboard() {
+            return {
+                streamerName: '',
+                platform: '',
+                donations: [],
+                loading: false,
+                error: null,
+                showUnreadOnly: false,
+                lastUpdated: '',
+                
+                init() {
+                    // Auto-refresh every 30 seconds if streamer name is set
+                    setInterval(() => {
+                        if (this.streamerName.trim()) {
+                            this.loadDonations(true); // Silent refresh
+                        }
+                    }, 30000);
+                },
+                
+                get filteredDonations() {
+                    if (this.showUnreadOnly) {
+                        return this.donations.filter(d => !d.read);
+                    }
+                    return this.donations;
+                },
+                
+                get totalAmount() {
+                    return this.donations.reduce((sum, d) => sum + d.amount, 0);
+                },
+                
+                get unreadCount() {
+                    return this.donations.filter(d => !d.read).length;
+                },
+                
+                get donationsWithMessages() {
+                    return this.donations.filter(d => d.message && d.message.trim()).length;
+                },
+                
+                toggleUnreadOnly() {
+                    this.showUnreadOnly = !this.showUnreadOnly;
+                },
+                
+                async loadDonations(silent = false) {
+                    if (!this.streamerName.trim()) {
+                        this.error = 'Please enter a streamer name';
+                        return;
+                    }
+                    
+                    if (!silent) {
+                        this.loading = true;
+                    }
+                    this.error = null;
+                    
+                    try {
+                        const url = new URL(`/api/donations/${encodeURIComponent(this.streamerName)}`, window.location.origin);
+                        if (this.platform) {
+                            url.searchParams.set('platform', this.platform);
+                        }
+                        
+                        console.log('Fetching donations from:', url.toString());
+                        console.log('Streamer name:', this.streamerName);
+                        console.log('Platform filter:', this.platform);
+                        
+                        const response = await fetch(url);
+                        const data = await response.json();
+                        
+                        console.log('API Response:', data);
+                        
+                        if (data.success) {
+                            this.donations = data.donations;
+                            this.lastUpdated = new Date().toLocaleTimeString();
+                            console.log('Loaded donations:', this.donations.length);
+                        } else {
+                            this.error = data.error || 'Failed to load donations';
+                            console.error('API Error:', data);
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to connect to server. Make sure the backend is running.';
+                        console.error('Error loading donations:', err);
+                        console.error('Attempted URL:', url.toString());
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                async markAsRead(donationId) {
+                    try {
+                        const response = await fetch(`/api/donations/${donationId}/read`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            // Update local state
+                            const donation = this.donations.find(d => d.id === donationId);
+                            if (donation) {
+                                donation.read = true;
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error marking donation as read:', err);
+                    }
+                },
+                
+                async markAllAsRead() {
+                    if (!this.streamerName.trim() || this.unreadCount === 0) return;
+                    
+                    try {
+                        const response = await fetch(`/api/donations/${encodeURIComponent(this.streamerName)}/read-all`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            // Update local state
+                            this.donations.forEach(donation => {
+                                donation.read = true;
+                            });
+                        }
+                    } catch (err) {
+                        console.error('Error marking all donations as read:', err);
+                    }
+                },
+                
+                formatDate(timestamp) {
+                    const date = new Date(timestamp);
+                    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                }
+            }
+        }
+    </script>
+</body>
+</html>
