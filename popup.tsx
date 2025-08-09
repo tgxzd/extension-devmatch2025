@@ -11,6 +11,7 @@ function IndexPopup() {
   const [currentTab, setCurrentTab] = useState<{ url: string, title: string }>({ url: "", title: "" })
   const [detectedStreamer, setDetectedStreamer] = useState<{ name: string, platform: string } | null>(null)
   const [wallet, setWallet] = useState<Wallet | null>(null)
+  const [contentValidated, setContentValidated] = useState<boolean | null>(null)
 
   const contractAddress = "0x39266942a0F29C6a3495e43fCaE510C0a454B1d9"
   const usdcAddress = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" // Circle USDC on Base Sepolia
@@ -121,6 +122,36 @@ function IndexPopup() {
     }
   }
 
+  // Logout function to clear wallet and stored data
+  const handleLogout = async () => {
+    // Confirm logout action
+    const confirmLogout = confirm('Are you sure you want to disconnect your wallet? You will need to reconnect or import your wallet again.')
+    if (!confirmLogout) return
+
+    try {
+      // Clear stored private key
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        await chrome.storage.local.remove(['wallet_private_key'])
+      } else {
+        localStorage.removeItem('wallet_private_key')
+      }
+      
+      // Reset all wallet-related state
+      setWallet(null)
+      setWalletAddress("")
+      setBalance("0.00")
+      setIsWalletConnected(false)
+      setDetectedStreamer(null)
+      setContentValidated(null)
+      setCurrentTab({ url: "", title: "" })
+      
+      console.log('Successfully logged out')
+    } catch (error) {
+      console.error('Error during logout:', error)
+      alert('Error during logout. Please try again.')
+    }
+  }
+
   // Check for existing wallet on component mount
   useEffect(() => {
     const initializeWallet = async () => {
@@ -172,6 +203,7 @@ function IndexPopup() {
   const detectStreamerFromTab = (tab: { url: string, title: string }) => {
     if (!tab.url || tab.url === "No tab detected" || tab.url === "Error detecting tab") {
       setDetectedStreamer(null)
+      setContentValidated(null) // Reset content validation
       return
     }
 
@@ -186,6 +218,7 @@ function IndexPopup() {
         name: channelName || "YouTube Creator",
         platform: "YouTube"
       })
+      setContentValidated(null) // Reset content validation for new streamer
       return
     }
 
@@ -200,12 +233,14 @@ function IndexPopup() {
           name: streamerName,
           platform: "Twitch"
         })
+        setContentValidated(null) // Reset content validation for new streamer
         return
       }
     }
 
     // No streamer detected
     setDetectedStreamer(null)
+    setContentValidated(null) // Reset content validation
   }
 
   // Function to handle wallet connection and tab detection
@@ -244,10 +279,21 @@ function IndexPopup() {
             <span className="text-xl font-bold tracking-tight text-shadow-md">DonateStream</span>
           </div>
           {isWalletConnected && (
-            <div className="glass-effect px-3 py-2 rounded-xl">
-              <div className="text-xs uppercase tracking-wide opacity-90 mb-0.5">Balance</div>
-              <div className="text-base font-bold text-shadow-sm">${balance} USDC</div>
-              <div className="text-xs opacity-80 mt-1 font-mono">{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</div>
+            <div className="flex items-center gap-3">
+              <div className="glass-effect px-3 py-2 rounded-xl">
+                <div className="text-xs uppercase tracking-wide opacity-90 mb-0.5">Balance</div>
+                <div className="text-base font-bold text-shadow-sm">${balance} USDC</div>
+                <div className="text-xs opacity-80 mt-1 font-mono">{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="glass-effect px-3 py-2 rounded-xl hover:bg-white/20 transition-colors group"
+                title="Disconnect Wallet"
+              >
+                <svg className="w-5 h-5 text-white/80 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
             </div>
           )}
         </div>
@@ -266,6 +312,8 @@ function IndexPopup() {
             usdcAddress={usdcAddress}
             loadBalance={loadBalance}
             approveUSDC={approveUSDC}
+            contentValidated={contentValidated}
+            setContentValidated={setContentValidated}
           />
         )}
       </main>
@@ -427,7 +475,9 @@ function DonationPage({
   contractAddress,
   usdcAddress,
   loadBalance,
-  approveUSDC
+  approveUSDC,
+  contentValidated,
+  setContentValidated
 }: {
   detectedStreamer: { name: string, platform: string } | null,
   currentTab: { url: string, title: string },
@@ -435,7 +485,9 @@ function DonationPage({
   contractAddress: string,
   usdcAddress: string,
   loadBalance: (walletInstance: Wallet) => Promise<void>,
-  approveUSDC: (amount: bigint) => Promise<void>
+  approveUSDC: (amount: bigint) => Promise<void>,
+  contentValidated: boolean | null,
+  setContentValidated: (value: boolean | null) => void
 }) {
   const [donationAmount, setDonationAmount] = useState<string>("")
   const [message, setMessage] = useState("")
@@ -586,6 +638,24 @@ function DonationPage({
     }
   }
 
+  // Function to check if content exists on the smart contract
+  async function checkContentExists(username: string, platform: string): Promise<boolean> {
+    if (!wallet) {
+      console.error('Wallet not connected')
+      return false
+    }
+    
+    try {
+      const contract = new Contract(contractAddress, ABI.abi, wallet)
+      const exists = await contract.contentExistsCheck(username, platform)
+      console.log(`Content exists check for ${username} on ${platform}:`, exists)
+      return exists
+    } catch (error: any) {
+      console.error("Failed to check content exists:", error)
+      return false
+    }
+  }
+
   // Debug function to check USDC balance and allowance
   async function checkUSDCStatus() {
     if (!wallet) {
@@ -623,7 +693,13 @@ function DonationPage({
   const handleDonate = async () => {
     if (!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0 || !wallet) return
 
-    // Validate message content first (unless forcing submission)
+    // Content must be validated first - this should be disabled via button state
+    if (contentValidated !== true) {
+      setStatusMessage('❌ Please verify the content creator first before donating')
+      return
+    }
+
+    // Validate message content (unless forcing submission)
     if (message && message.trim().length > 0 && !forceSubmit) {
       const validation = await validateMessage(message)
       if (!validation.isValid) {
@@ -896,12 +972,22 @@ function DonationPage({
         <button
           className="gradient-green text-white px-6 py-4.5 rounded-2xl font-bold flex items-center justify-center gap-2.5 w-full transition-all duration-300 relative overflow-hidden shadow-primary-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none btn-hover shimmer-effect uppercase tracking-wide"
           onClick={handleDonate}
-          disabled={!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0 || loading}
+          disabled={!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0 || loading || contentValidated !== true}
         >
           {loading ? (
             <>
               <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               Processing...
+            </>
+          ) : contentValidated === false ? (
+            <>
+              <span className="text-lg">🚫</span>
+              Content Not Verified - Cannot Donate
+            </>
+          ) : contentValidated === null ? (
+            <>
+              <span className="text-lg">🔍</span>
+              Verify Content Creator First
             </>
           ) : (
             <>
@@ -910,6 +996,58 @@ function DonationPage({
             </>
           )}
         </button>
+        
+        {/* Content validation failed warning */}
+        {contentValidated === false && detectedStreamer && (
+          <div className="mt-3 bg-red-50 border-2 border-red-200 rounded-2xl p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-0.5">
+                <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-red-800 mb-1">Content Creator Not Registered</h3>
+                <p className="text-sm text-red-700">
+                  <strong>{detectedStreamer.name}</strong> on <strong>{detectedStreamer.platform}</strong> is not registered on our platform. 
+                  Donations can only be made to verified content creators. Please verify the content creator or try a different creator.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Content validation button */}
+        {detectedStreamer && (
+          <button
+            className={`mt-3 px-4 py-2 rounded-xl text-sm font-medium flex items-center justify-center gap-2 w-full transition-colors ${
+              contentValidated === true 
+                ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                : contentValidated === false 
+                ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+            }`}
+            onClick={() => checkContentExists(detectedStreamer.name, detectedStreamer.platform).then(exists => {
+              setContentValidated(exists)
+              if (exists) {
+                setStatusMessage(`✅ ${detectedStreamer.name} is registered on ${detectedStreamer.platform}`)
+              } else {
+                setStatusMessage(`❌ ${detectedStreamer.name} is not registered on ${detectedStreamer.platform}`)
+              }
+            })}
+            disabled={loading}
+          >
+            <span className="text-sm">
+              {contentValidated === true ? '✅' : contentValidated === false ? '❌' : '🔍'}
+            </span>
+            {contentValidated === true 
+              ? `${detectedStreamer.name} is Verified` 
+              : contentValidated === false 
+              ? `${detectedStreamer.name} Not Found`
+              : `Verify ${detectedStreamer.name} is Registered`
+            }
+          </button>
+        )}
         
         {/* Debug button for checking USDC status */}
         <button
