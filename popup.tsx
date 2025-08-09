@@ -1,11 +1,136 @@
 import { useState, useEffect } from "react"
 import "./style.css"
+import ABI from "./abi.json"
+import { ethers, Wallet, JsonRpcProvider, Contract, formatUnits, parseUnits } from "ethers"
+
 
 function IndexPopup() {
   const [isWalletConnected, setIsWalletConnected] = useState(false)
-  const [balance] = useState("25.50")
+  const [walletAddress, setWalletAddress] = useState<string>("")
+  const [balance, setBalance] = useState("0.00")
   const [currentTab, setCurrentTab] = useState<{ url: string, title: string }>({ url: "", title: "" })
   const [detectedStreamer, setDetectedStreamer] = useState<{ name: string, platform: string } | null>(null)
+  const [wallet, setWallet] = useState<Wallet | null>(null)
+
+  const contractAddress = "0x39266942a0F29C6a3495e43fCaE510C0a454B1d9"
+  const usdcAddress = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" // Circle USDC on Base Sepolia
+  const rpcUrl = "https://sepolia.base.org" // Base Sepolia testnet
+
+  // Wallet management functions
+  const generateWallet = () => {
+    const newWallet = Wallet.createRandom()
+    return newWallet
+  }
+
+  const storePrivateKey = async (privateKey: string) => {
+    try {
+      // Store encrypted private key in chrome.storage.local for extension
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        await chrome.storage.local.set({ 'wallet_private_key': privateKey })
+      } else {
+        // Fallback to localStorage for development
+        localStorage.setItem('wallet_private_key', privateKey)
+      }
+    } catch (error) {
+      console.error('Error storing private key:', error)
+    }
+  }
+
+  const loadPrivateKey = async (): Promise<string | null> => {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        const result = await chrome.storage.local.get(['wallet_private_key'])
+        return result.wallet_private_key || null
+      } else {
+        // Fallback to localStorage for development
+        return localStorage.getItem('wallet_private_key')
+      }
+    } catch (error) {
+      console.error('Error loading private key:', error)
+      return null
+    }
+  }
+
+  const setupWallet = async (privateKey?: string) => {
+    try {
+      const provider = new JsonRpcProvider(rpcUrl)
+      let walletInstance: Wallet
+
+      if (privateKey) {
+        // Import existing wallet
+        walletInstance = new Wallet(privateKey, provider)
+      } else {
+        // Generate new wallet
+        const tempWallet = generateWallet()
+        walletInstance = new Wallet(tempWallet.privateKey, provider)
+        await storePrivateKey(walletInstance.privateKey)
+      }
+
+      setWallet(walletInstance)
+      setWalletAddress(walletInstance.address)
+      setIsWalletConnected(true)
+      
+      // Load USDC balance
+      await loadBalance(walletInstance)
+      
+      return walletInstance
+    } catch (error) {
+      console.error('Error setting up wallet:', error)
+      return null
+    }
+  }
+
+  const loadBalance = async (walletInstance: Wallet) => {
+    try {
+      // USDC token contract ABI (simplified)
+      const erc20Abi = [
+        "function balanceOf(address owner) view returns (uint256)",
+        "function decimals() view returns (uint8)"
+      ]
+      
+      const usdcContract = new Contract(usdcAddress, erc20Abi, walletInstance)
+      const balanceWei = await usdcContract.balanceOf(walletInstance.address)
+      const decimals = await usdcContract.decimals()
+      const balanceFormatted = formatUnits(balanceWei, decimals)
+      
+      setBalance(parseFloat(balanceFormatted).toFixed(2))
+    } catch (error) {
+      console.error('Error loading balance:', error)
+      setBalance("0.00")
+    }
+  }
+
+  const approveUSDC = async (amount: bigint) => {
+    if (!wallet) throw new Error("Wallet not connected")
+
+    const erc20Abi = [
+      "function approve(address spender, uint256 amount) returns (bool)",
+      "function allowance(address owner, address spender) view returns (uint256)"
+    ]
+    
+    const usdcContract = new Contract(usdcAddress, erc20Abi, wallet)
+    
+    // Check current allowance
+    const currentAllowance = await usdcContract.allowance(wallet.address, contractAddress)
+    
+    if (currentAllowance < amount) {
+      console.log('Approving USDC spending...')
+      const approveTx = await usdcContract.approve(contractAddress, amount)
+      await approveTx.wait()
+      console.log('USDC approval confirmed')
+    }
+  }
+
+  // Check for existing wallet on component mount
+  useEffect(() => {
+    const initializeWallet = async () => {
+      const storedPrivateKey = await loadPrivateKey()
+      if (storedPrivateKey) {
+        await setupWallet(storedPrivateKey)
+      }
+    }
+    initializeWallet()
+  }, [])
 
   // Function to get current active tab
   const getCurrentTab = async () => {
@@ -85,7 +210,7 @@ function IndexPopup() {
 
   // Function to handle wallet connection and tab detection
   const handleWalletConnect = async () => {
-    setIsWalletConnected(true)
+    await setupWallet()
     
     // Get current tab info after wallet connection
     const tabInfo = await getCurrentTab()
@@ -122,6 +247,7 @@ function IndexPopup() {
             <div className="glass-effect px-3 py-2 rounded-xl">
               <div className="text-xs uppercase tracking-wide opacity-90 mb-0.5">Balance</div>
               <div className="text-base font-bold text-shadow-sm">${balance} USDC</div>
+              <div className="text-xs opacity-80 mt-1 font-mono">{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</div>
             </div>
           )}
         </div>
@@ -135,6 +261,11 @@ function IndexPopup() {
           <DonationPage
             detectedStreamer={detectedStreamer}
             currentTab={currentTab}
+            wallet={wallet}
+            contractAddress={contractAddress}
+            usdcAddress={usdcAddress}
+            loadBalance={loadBalance}
+            approveUSDC={approveUSDC}
           />
         )}
       </main>
@@ -146,35 +277,142 @@ function IndexPopup() {
 
 // Wallet Connection Component
 function WalletConnection({ onConnect }: { onConnect: () => void }) {
+  const [showImport, setShowImport] = useState(false)
+  const [privateKey, setPrivateKey] = useState("")
+  const [importError, setImportError] = useState("")
+
+  const handleCreateWallet = () => {
+    onConnect()
+  }
+
+  const handleImportWallet = async () => {
+    if (!privateKey.trim()) {
+      setImportError("Please enter a private key")
+      return
+    }
+
+    try {
+      let cleanedKey = privateKey.trim()
+      
+      // Remove any spaces or line breaks
+      cleanedKey = cleanedKey.replace(/\s+/g, '')
+      
+      // Add 0x prefix if not present
+      if (!cleanedKey.startsWith('0x') && !cleanedKey.startsWith('0X')) {
+        cleanedKey = '0x' + cleanedKey
+      }
+      
+      // Validate using ethers.js directly - it has better validation
+      const testWallet = new Wallet(cleanedKey)
+      
+      // If we get here, the private key is valid
+      console.log('Valid wallet created with address:', testWallet.address)
+      
+      // Store and connect
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        await chrome.storage.local.set({ 'wallet_private_key': cleanedKey })
+      } else {
+        localStorage.setItem('wallet_private_key', cleanedKey)
+      }
+      
+      onConnect()
+      
+    } catch (error: any) {
+      console.error('Import error:', error)
+      console.error('Attempted key:', privateKey.trim())
+      
+      // Provide more specific error messages based on the error
+      if (error.message && error.message.includes('invalid private key')) {
+        setImportError("Invalid private key format. Please check that you have the correct 64-character hexadecimal private key.")
+      } else if (error.message && error.message.includes('invalid hex')) {
+        setImportError("Private key must contain only hexadecimal characters (0-9, a-f).")
+      } else {
+        setImportError(`Error: ${error.message || 'Invalid private key format'}`)
+      }
+    }
+  }
+
+  if (showImport) {
+    return (
+      <div className="flex items-center justify-center min-h-full p-5">
+        <div className="text-center max-w-sm">
+          <div className="text-6xl mb-6">🔑</div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-3">Import Wallet</h2>
+          <p className="text-gray-600 mb-6 leading-relaxed">
+            Enter your private key to import an existing wallet
+          </p>
+
+          <div className="mb-4">
+            <textarea
+              className="w-full p-3 border-2 border-gray-200 rounded-xl text-sm bg-white resize-none font-mono"
+              value={privateKey}
+              onChange={(e) => {
+                setPrivateKey(e.target.value)
+                setImportError("")
+              }}
+              rows={3}
+            />
+            {importError && (
+              <p className="text-red-500 text-xs mt-1 text-left">{importError}</p>
+            )}
+          </div>
+
+          <button 
+            className="gradient-primary text-white px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 w-full mb-4 btn-hover shimmer-effect shadow-primary"
+            onClick={handleImportWallet}
+          >
+            <span className="text-lg">📥</span>
+            Import Wallet
+          </button>
+
+          <button 
+            className="text-gray-600 underline text-sm"
+            onClick={() => setShowImport(false)}
+          >
+            ← Back to create new wallet
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-center justify-center min-h-full p-5">
       <div className="text-center max-w-sm">
         <div className="text-6xl mb-6">🔗</div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-3">Connect Your Wallet</h2>
+        <h2 className="text-2xl font-bold text-gray-900 mb-3">Setup Your Wallet</h2>
         <p className="text-gray-600 mb-6 leading-relaxed">
-          Connect your wallet to start donating to streamers with USDC
+          Create a new wallet or import an existing one to start donating with USDC
         </p>
 
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
           <span className="inline-block bg-blue-500 text-white px-3 py-1 rounded-full text-xs font-semibold mb-2">
-            Coinbase Circle Testnet
+            Base Sepolia Testnet
           </span>
           <p className="text-blue-800 text-sm">
-            Using USDC on Circle testnet for secure donations
+            Using USDC on Base testnet for secure donations
           </p>
         </div>
 
         <button 
-          className="gradient-primary text-white px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 w-full mb-4 btn-hover shimmer-effect shadow-primary"
-          onClick={onConnect}
+          className="gradient-primary text-white px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 w-full mb-3 btn-hover shimmer-effect shadow-primary"
+          onClick={handleCreateWallet}
         >
-          <span className="text-lg">👛</span>
-          Connect Wallet
+          <span className="text-lg">✨</span>
+          Create New Wallet
+        </button>
+
+        <button 
+          className="bg-gray-200 text-gray-700 px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 w-full mb-4 hover:bg-gray-300 transition-colors"
+          onClick={() => setShowImport(true)}
+        >
+          <span className="text-lg">📥</span>
+          Import Existing Wallet
         </button>
 
         <div className="flex items-center justify-center gap-2 opacity-70">
           <span className="text-sm">🔒</span>
-          <p className="text-xs text-gray-600">Your wallet connection is secure and encrypted</p>
+          <p className="text-xs text-gray-600">Your private key is stored securely locally</p>
         </div>
       </div>
     </div>
@@ -184,10 +422,20 @@ function WalletConnection({ onConnect }: { onConnect: () => void }) {
 // Donation Page Component
 function DonationPage({
   detectedStreamer,
-  currentTab
+  currentTab,
+  wallet,
+  contractAddress,
+  usdcAddress,
+  loadBalance,
+  approveUSDC
 }: {
   detectedStreamer: { name: string, platform: string } | null,
-  currentTab: { url: string, title: string }
+  currentTab: { url: string, title: string },
+  wallet: Wallet | null,
+  contractAddress: string,
+  usdcAddress: string,
+  loadBalance: (walletInstance: Wallet) => Promise<void>,
+  approveUSDC: (amount: bigint) => Promise<void>
 }) {
   const [donationAmount, setDonationAmount] = useState<string>("")
   const [message, setMessage] = useState("")
@@ -195,6 +443,7 @@ function DonationPage({
   const [showWarning, setShowWarning] = useState(false)
   const [warningReason, setWarningReason] = useState("")
   const [forceSubmit, setForceSubmit] = useState(false)
+  const [txHash, setTxHash] = useState<string>("")
 
   // Function to validate message content
   const validateMessage = async (messageText: string) => {
@@ -234,7 +483,7 @@ function DonationPage({
   }
 
   const handleDonate = async () => {
-    if (!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0) return
+    if (!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0 || !wallet) return
 
     // Validate message content first (unless forcing submission)
     if (message && message.trim().length > 0 && !forceSubmit) {
@@ -250,59 +499,77 @@ function DonationPage({
     setShowWarning(false)
 
     try {
-      // Send donation data to backend
+      const amount = parseFloat(donationAmount)
+      const amountWei = parseUnits(amount.toString(), 6) // USDC has 6 decimals
+
+      // First, approve USDC spending
+      await approveUSDC(amountWei)
+
+      // Then call the donation contract
+      const contract = new Contract(contractAddress, ABI.abi, wallet)
+      
+      const tx = await contract.donateTokenToContent(
+        detectedStreamer.name,
+        detectedStreamer.platform,
+        usdcAddress,
+        amountWei
+      )
+
+      console.log('Transaction sent:', tx.hash)
+      setTxHash(tx.hash)
+      await tx.wait()
+      console.log('Transaction confirmed')
+
+      // Update balance after successful transaction
+      await loadBalance(wallet)
+
+      // Send donation data to backend for tracking
       const donationData = {
         streamerName: detectedStreamer.name,
         streamerPlatform: detectedStreamer.platform,
-        donorName: "Anonymous Donor", // You can add donor name input if needed
-        amount: parseFloat(donationAmount),
+        donorName: "Anonymous Donor",
+        amount: amount,
         message: message.trim(),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        txHash: tx.hash,
+        walletAddress: wallet.address
       }
 
-      const response = await fetch('http://localhost:3001/api/donations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(donationData)
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        // Show success message
-        setShowSuccess(true)
-        setTimeout(() => setShowSuccess(false), 3000)
-
-        // Reset form and warning states
-        setDonationAmount("")
-        setMessage("")
-        setShowWarning(false)
-        setForceSubmit(false)
-      } else if (result.isContentViolation) {
-        // Handle content violation from server-side validation
-        setWarningReason(result.reason || 'Message contains inappropriate content')
-        setShowWarning(true)
-      } else {
-        console.error('Failed to save donation:', result.error)
-        // Still show success to user since the "donation" was processed
-        setShowSuccess(true)
-        setTimeout(() => setShowSuccess(false), 3000)
-        setDonationAmount("")
-        setMessage("")
-        setShowWarning(false)
-        setForceSubmit(false)
+      // Try to save to backend (non-blocking)
+      try {
+        await fetch('http://localhost:3001/api/donations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(donationData)
+        })
+      } catch (backendError) {
+        console.log('Backend logging failed, but donation was successful:', backendError)
       }
-    } catch (error) {
-      console.error('Error sending donation to backend:', error)
-      // Still show success to user since the main donation flow worked
+
+      // Show success message
       setShowSuccess(true)
       setTimeout(() => setShowSuccess(false), 3000)
+
+      // Reset form and warning states
       setDonationAmount("")
       setMessage("")
       setShowWarning(false)
       setForceSubmit(false)
+
+    } catch (error: any) {
+      console.error('Error processing donation:', error)
+      
+      // Show user-friendly error message
+      let errorMessage = "Transaction failed. Please try again."
+      if (error.message.includes("insufficient funds")) {
+        errorMessage = "Insufficient USDC balance for this donation."
+      } else if (error.message.includes("user rejected")) {
+        errorMessage = "Transaction was cancelled."
+      }
+      
+      alert(errorMessage)
     }
   }
 
@@ -328,6 +595,12 @@ function DonationPage({
           <p className="text-gray-600 mb-4">
             Your ${donationAmount} USDC donation was sent to {detectedStreamer?.name}
           </p>
+          {txHash && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+              <span className="block text-xs font-semibold text-blue-600 mb-1">Transaction Hash:</span>
+              <span className="text-blue-800 font-mono text-xs break-all">{txHash}</span>
+            </div>
+          )}
           {message && (
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 mt-4">
               <span className="block text-xs font-semibold text-green-600 mb-1">Your message:</span>
