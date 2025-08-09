@@ -444,6 +444,8 @@ function DonationPage({
   const [warningReason, setWarningReason] = useState("")
   const [forceSubmit, setForceSubmit] = useState(false)
   const [txHash, setTxHash] = useState<string>("")
+  const [loading, setLoading] = useState(false)
+  const [statusMessage, setStatusMessage] = useState("")
 
   // Function to validate message content
   const validateMessage = async (messageText: string) => {
@@ -482,6 +484,142 @@ function DonationPage({
     }
   }
 
+  // USDC donation function with proper approval flow
+  async function donateUSDC(contentUrl: string, amount: string) {
+    if (!wallet) {
+      setStatusMessage('Please connect your wallet first!')
+      return
+    }
+    
+    try {
+      setLoading(true)
+      setStatusMessage('Processing donation...')
+      
+      // Convert amount to proper decimals (USDC has 6 decimals)
+      const amountInWei = parseUnits(amount, 6)
+      
+      // Create USDC contract with full ERC20 ABI
+      const usdcContract = new Contract(
+        usdcAddress,
+        [
+          "function approve(address spender, uint256 amount) returns (bool)",
+          "function allowance(address owner, address spender) view returns (uint256)",
+          "function balanceOf(address account) view returns (uint256)",
+          "function decimals() view returns (uint8)"
+        ],
+        wallet
+      )
+      
+      // Check current balance
+      const userAddress = wallet.address
+      const balance = await usdcContract.balanceOf(userAddress)
+      console.log(`USDC Balance: ${formatUnits(balance, 6)} USDC`)
+      
+      if (balance < amountInWei) {
+        throw new Error(`Insufficient USDC balance. You have ${formatUnits(balance, 6)} USDC but need ${amount} USDC`)
+      }
+      
+      // Check current allowance
+      const currentAllowance = await usdcContract.allowance(userAddress, contractAddress)
+      console.log(`Current allowance: ${formatUnits(currentAllowance, 6)} USDC`)
+      
+      // If allowance is insufficient, approve
+      if (currentAllowance < amountInWei) {
+        console.log("Approving USDC spending...")
+        setStatusMessage('Approving USDC spending...')
+        
+        // First reset allowance to 0 (some tokens require this)
+        if (currentAllowance > 0) {
+          console.log("Resetting allowance to 0 first...")
+          const resetTx = await usdcContract.approve(contractAddress, 0)
+          await resetTx.wait()
+          console.log("Allowance reset to 0")
+        }
+        
+        // Now set the new allowance
+        const approveTx = await usdcContract.approve(contractAddress, amountInWei)
+        const approveReceipt = await approveTx.wait()
+        console.log("✅ USDC approved, tx hash:", approveReceipt.hash)
+        
+        // Verify the allowance was set correctly
+        const newAllowance = await usdcContract.allowance(userAddress, contractAddress)
+        console.log(`New allowance: ${formatUnits(newAllowance, 6)} USDC`)
+        
+        if (newAllowance < amountInWei) {
+          throw new Error("Approval failed - allowance not set correctly")
+        }
+      } else {
+        console.log("Sufficient allowance already exists")
+      }
+      
+      // 2. Make the donation using the contract
+      console.log("Making USDC donation...")
+      setStatusMessage('Making USDC donation...')
+      
+      const contract = new Contract(contractAddress, ABI.abi, wallet)
+      const donateTx = await contract.donateTokenToContent(
+        contentUrl,
+        usdcAddress,
+        amountInWei
+      )
+      
+      const donateReceipt = await donateTx.wait()
+      console.log("✅ USDC donation successful, tx hash:", donateReceipt.hash)
+      setStatusMessage('✅ USDC donation successful!')
+      
+      return donateReceipt.hash
+      
+    } catch (error: any) {
+      console.error("Donation failed:", error)
+      if (error.message.includes("insufficient funds")) {
+        setStatusMessage("Donation failed: Insufficient ETH for gas fees")
+      } else if (error.message.includes("User denied") || error.message.includes("user rejected")) {
+        setStatusMessage("Donation cancelled by user")
+      } else if (error.message.includes("transfer amount exceeds allowance")) {
+        setStatusMessage("Donation failed: Allowance issue. Please try again.")
+      } else {
+        setStatusMessage(`Donation failed: ${error.message}`)
+      }
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Debug function to check USDC balance and allowance
+  async function checkUSDCStatus() {
+    if (!wallet) {
+      setStatusMessage('Please connect your wallet first!')
+      return
+    }
+    
+    try {
+      const usdcContract = new Contract(
+        usdcAddress,
+        [
+          "function allowance(address owner, address spender) view returns (uint256)",
+          "function balanceOf(address account) view returns (uint256)"
+        ],
+        wallet
+      )
+      
+      const userAddress = wallet.address
+      const balance = await usdcContract.balanceOf(userAddress)
+      const allowance = await usdcContract.allowance(userAddress, contractAddress)
+      
+      const balanceFormatted = formatUnits(balance, 6)
+      const allowanceFormatted = formatUnits(allowance, 6)
+      
+      console.log(`USDC Balance: ${balanceFormatted} USDC`)
+      console.log(`Current Allowance: ${allowanceFormatted} USDC`)
+      
+      setStatusMessage(`Balance: ${balanceFormatted} USDC | Allowance: ${allowanceFormatted} USDC`)
+    } catch (error: any) {
+      console.error("Failed to check USDC status:", error)
+      setStatusMessage(`Failed to check USDC status: ${error.message}`)
+    }
+  }
+
   const handleDonate = async () => {
     if (!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0 || !wallet) return
 
@@ -500,25 +638,13 @@ function DonationPage({
 
     try {
       const amount = parseFloat(donationAmount)
-      const amountWei = parseUnits(amount.toString(), 6) // USDC has 6 decimals
-
-      // First, approve USDC spending
-      await approveUSDC(amountWei)
-
-      // Then call the donation contract
-      const contract = new Contract(contractAddress, ABI.abi, wallet)
       
-      const tx = await contract.donateTokenToContent(
-        detectedStreamer.name,
-        detectedStreamer.platform,
-        usdcAddress,
-        amountWei
-      )
+      // Use the new donateUSDC function with proper content URL
+      const contentUrl = currentTab.url
+      const txHash = await donateUSDC(contentUrl, amount.toString())
 
-      console.log('Transaction sent:', tx.hash)
-      setTxHash(tx.hash)
-      await tx.wait()
-      console.log('Transaction confirmed')
+      console.log('Transaction confirmed with hash:', txHash)
+      setTxHash(txHash || "")
 
       // Update balance after successful transaction
       await loadBalance(wallet)
@@ -531,8 +657,9 @@ function DonationPage({
         amount: amount,
         message: message.trim(),
         timestamp: new Date().toISOString(),
-        txHash: tx.hash,
-        walletAddress: wallet.address
+        txHash: txHash || "",
+        walletAddress: wallet.address,
+        contentUrl: contentUrl
       }
 
       // Try to save to backend (non-blocking)
@@ -557,19 +684,14 @@ function DonationPage({
       setMessage("")
       setShowWarning(false)
       setForceSubmit(false)
+      setStatusMessage("")
 
     } catch (error: any) {
       console.error('Error processing donation:', error)
       
-      // Show user-friendly error message
-      let errorMessage = "Transaction failed. Please try again."
-      if (error.message.includes("insufficient funds")) {
-        errorMessage = "Insufficient USDC balance for this donation."
-      } else if (error.message.includes("user rejected")) {
-        errorMessage = "Transaction was cancelled."
-      }
-      
-      alert(errorMessage)
+      // The error message is already set by donateUSDC function
+      // Just show an alert for the user
+      alert(statusMessage || "Transaction failed. Please try again.")
     }
   }
 
@@ -648,6 +770,35 @@ function DonationPage({
             <div className="gradient-red text-white px-3 py-1.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide shadow-md">
               <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse-slow"></span>
               <span>LIVE</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Status Message */}
+      {statusMessage && (
+        <div className="mb-4">
+          <div className={`border-2 rounded-2xl p-4 ${
+            statusMessage.includes('✅') || statusMessage.includes('successful') 
+              ? 'bg-green-50 border-green-200' 
+              : statusMessage.includes('failed') || statusMessage.includes('error')
+              ? 'bg-red-50 border-red-200'
+              : 'bg-blue-50 border-blue-200'
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className="flex-shrink-0">
+                {loading && (
+                  <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                )}
+                {statusMessage.includes('✅') && <span className="text-green-500 text-lg">✅</span>}
+                {statusMessage.includes('failed') && <span className="text-red-500 text-lg">❌</span>}
+              </div>
+              <p className={`text-sm font-medium ${
+                statusMessage.includes('✅') ? 'text-green-800' :
+                statusMessage.includes('failed') ? 'text-red-800' : 'text-blue-800'
+              }`}>
+                {statusMessage}
+              </p>
             </div>
           </div>
         </div>
@@ -745,10 +896,29 @@ function DonationPage({
         <button
           className="gradient-green text-white px-6 py-4.5 rounded-2xl font-bold flex items-center justify-center gap-2.5 w-full transition-all duration-300 relative overflow-hidden shadow-primary-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none btn-hover shimmer-effect uppercase tracking-wide"
           onClick={handleDonate}
-          disabled={!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0}
+          disabled={!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0 || loading}
         >
-          <span className="text-lg">💝</span>
-          {donationAmount && parseFloat(donationAmount) > 0 ? `Donate $${donationAmount} USDC` : 'Enter Amount to Donate'}
+          {loading ? (
+            <>
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Processing...
+            </>
+          ) : (
+            <>
+              <span className="text-lg">💝</span>
+              {donationAmount && parseFloat(donationAmount) > 0 ? `Donate $${donationAmount} USDC` : 'Enter Amount to Donate'}
+            </>
+          )}
+        </button>
+        
+        {/* Debug button for checking USDC status */}
+        <button
+          className="mt-3 bg-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium flex items-center justify-center gap-2 w-full hover:bg-gray-300 transition-colors"
+          onClick={checkUSDCStatus}
+          disabled={loading}
+        >
+          <span className="text-sm">🔍</span>
+          Check USDC Balance & Allowance
         </button>
       </div>
     </div>
