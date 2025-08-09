@@ -1,40 +1,109 @@
 import { useState, useEffect } from "react"
 import "./style.css"
 
-type UserType = "viewer" | "streamer" | null
-
 function IndexPopup() {
-  const [userType, setUserType] = useState<UserType>(null)
   const [isWalletConnected, setIsWalletConnected] = useState(false)
   const [balance] = useState("25.50")
   const [currentTab, setCurrentTab] = useState<{ url: string, title: string }>({ url: "", title: "" })
   const [detectedStreamer, setDetectedStreamer] = useState<{ name: string, platform: string } | null>(null)
 
-  // Simulate getting current tab info
-  useEffect(() => {
-    // In real implementation, you'd get this from chrome.tabs API
-    const mockTab = {
-      url: "https://www.youtube.com/watch?v=example",
-      title: "Amazing Gaming Stream - TechStreamer99"
+  // Function to get current active tab
+  const getCurrentTab = async () => {
+    try {
+      // Check if we're in a Chrome extension environment
+      if (typeof chrome !== 'undefined' && chrome.tabs) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (tab && tab.url && tab.title) {
+          return {
+            url: tab.url,
+            title: tab.title
+          }
+        }
+      }
+      
+      // Fallback: try to get current window location (for development/testing)
+      if (typeof window !== 'undefined' && window.location) {
+        return {
+          url: window.location.href,
+          title: document.title
+        }
+      }
+      
+      // Final fallback
+      return {
+        url: "No tab detected",
+        title: "No tab detected"
+      }
+    } catch (error) {
+      console.error("Error getting current tab:", error)
+      return {
+        url: "Error detecting tab",
+        title: "Error detecting tab"
+      }
     }
-    setCurrentTab(mockTab)
+  }
 
-    // Simulate streamer detection
-    if (mockTab.url.includes("youtube.com") || mockTab.url.includes("twitch.tv")) {
+  // Function to detect streamer from tab info
+  const detectStreamerFromTab = (tab: { url: string, title: string }) => {
+    if (!tab.url || tab.url === "No tab detected" || tab.url === "Error detecting tab") {
+      setDetectedStreamer(null)
+      return
+    }
+
+    // YouTube detection
+    if (tab.url.includes("youtube.com/watch") || tab.url.includes("youtu.be/")) {
+      // Extract channel name from title (basic parsing)
+      const title = tab.title.replace(" - YouTube", "")
+      const channelMatch = title.match(/(.+?)\s*(-|–|—|\||:)/) // Common separators
+      const channelName = channelMatch ? channelMatch[1].trim() : title.split(" ")[0]
+      
       setDetectedStreamer({
-        name: "TechStreamer99",
-        platform: mockTab.url.includes("youtube.com") ? "YouTube" : "Twitch"
+        name: channelName || "YouTube Creator",
+        platform: "YouTube"
       })
+      return
     }
+
+    // Twitch detection
+    if (tab.url.includes("twitch.tv/")) {
+      // Extract streamer name from URL
+      const urlMatch = tab.url.match(/twitch\.tv\/([^/?]+)/)
+      const streamerName = urlMatch ? urlMatch[1] : null
+      
+      if (streamerName && streamerName !== "directory" && streamerName !== "browse") {
+        setDetectedStreamer({
+          name: streamerName,
+          platform: "Twitch"
+        })
+        return
+      }
+    }
+
+    // No streamer detected
+    setDetectedStreamer(null)
+  }
+
+  // Function to handle wallet connection and tab detection
+  const handleWalletConnect = async () => {
+    setIsWalletConnected(true)
+    
+    // Get current tab info after wallet connection
+    const tabInfo = await getCurrentTab()
+    setCurrentTab(tabInfo)
+    
+    // Detect streamer from the tab
+    detectStreamerFromTab(tabInfo)
+  }
+
+  // Initial tab detection (for development/testing)
+  useEffect(() => {
+    getCurrentTab().then(tabInfo => {
+      setCurrentTab(tabInfo)
+      if (isWalletConnected) {
+        detectStreamerFromTab(tabInfo)
+      }
+    })
   }, [])
-
-  if (userType === null) {
-    return <UserTypeSelection onSelect={setUserType} />
-  }
-
-  if (userType === "streamer") {
-    return <StreamerDashboard />
-  }
 
   return (
     <div className="app-container">
@@ -57,7 +126,7 @@ function IndexPopup() {
       {/* Page Content */}
       <main className="page-content">
         {!isWalletConnected ? (
-          <WalletConnection onConnect={() => setIsWalletConnected(true)} />
+          <WalletConnection onConnect={handleWalletConnect} />
         ) : (
           <DonationPage
             detectedStreamer={detectedStreamer}
@@ -66,65 +135,12 @@ function IndexPopup() {
         )}
       </main>
 
-      {/* Footer */}
-      {isWalletConnected && (
-        <footer className="app-footer">
-          <button
-            className="footer-btn"
-            onClick={() => setUserType(null)}
-          >
-            Switch Mode
-          </button>
-        </footer>
-      )}
+
     </div>
   )
 }
 
-// User Type Selection Component
-function UserTypeSelection({ onSelect }: { onSelect: (type: UserType) => void }) {
-  return (
-    <div className="app-container">
-      <header className="app-header">
-        <div className="header-content">
-          <div className="logo">
-            <span className="logo-icon">🎁</span>
-            <span className="logo-text">DonateStream</span>
-          </div>
-        </div>
-      </header>
 
-      <main className="page-content">
-        <div className="page user-selection">
-          <div className="welcome-section">
-            <h1>Welcome to DonateStream</h1>
-            <p>Support your favorite streamers with USDC donations</p>
-          </div>
-
-          <div className="user-type-cards">
-            <button
-              className="user-type-card viewer-card"
-              onClick={() => onSelect("viewer")}
-            >
-              <span className="card-icon">👀</span>
-              <h3>I'm a Viewer</h3>
-              <p>I want to donate to streamers</p>
-            </button>
-
-            <button
-              className="user-type-card streamer-card"
-              onClick={() => onSelect("streamer")}
-            >
-              <span className="card-icon">🎮</span>
-              <h3>I'm a Streamer</h3>
-              <p>I want to receive donations</p>
-            </button>
-          </div>
-        </div>
-      </main>
-    </div>
-  )
-}
 
 // Wallet Connection Component
 function WalletConnection({ onConnect }: { onConnect: () => void }) {
@@ -207,7 +223,20 @@ function DonationPage({
 
   return (
     <div className="page donation-page">
-      {detectedStreamer ? (
+      {/* Current Tab Info */}
+      <div className="tab-info">
+        <div className="tab-url">
+          <span className="url-label">Current page:</span>
+          <span className="url-text">{currentTab.url}</span>
+        </div>
+        {currentTab.title && (
+          <div className="tab-title">
+            <span className="title-text">{currentTab.title}</span>
+          </div>
+        )}
+      </div>
+
+      {detectedStreamer && (
         <div className="streamer-section">
           <div className="streamer-card">
             <div className="streamer-avatar">
@@ -222,12 +251,6 @@ function DonationPage({
               <span>LIVE</span>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="no-streamer">
-          <span className="no-streamer-icon">📺</span>
-          <p>No streamer detected on this page</p>
-          <span className="current-url">{currentTab.url}</span>
         </div>
       )}
 
@@ -273,65 +296,6 @@ function DonationPage({
   )
 }
 
-// Streamer Dashboard Component (Placeholder)
-function StreamerDashboard() {
-  const [recentDonations] = useState([
-    { donor: "viewer123", amount: "5.00", message: "Amazing stream!", time: "2 mins ago" },
-    { donor: "gamer456", amount: "1.00", message: "Keep it up!", time: "5 mins ago" },
-    { donor: "fan789", amount: "0.50", message: "Love the content", time: "8 mins ago" }
-  ])
 
-  return (
-    <div className="app-container">
-      <header className="app-header">
-        <div className="header-content">
-          <div className="logo">
-            <span className="logo-icon">🎮</span>
-            <span className="logo-text">Streamer Dashboard</span>
-          </div>
-        </div>
-      </header>
-
-      <main className="page-content">
-        <div className="page streamer-dashboard">
-          <div className="dashboard-stats">
-            <div className="stat-card">
-              <span className="stat-icon">💰</span>
-              <div className="stat-info">
-                <span className="stat-value">$12.50</span>
-                <span className="stat-label">Today's Total</span>
-              </div>
-            </div>
-            <div className="stat-card">
-              <span className="stat-icon">👥</span>
-              <div className="stat-info">
-                <span className="stat-value">8</span>
-                <span className="stat-label">Donors</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="recent-donations">
-            <h3>Recent Donations</h3>
-            <div className="donations-list">
-              {recentDonations.map((donation, index) => (
-                <div key={index} className="donation-item">
-                  <div className="donation-info">
-                    <span className="donor-name">{donation.donor}</span>
-                    <span className="donation-time">{donation.time}</span>
-                    {donation.message && (
-                      <span className="donation-message">"{donation.message}"</span>
-                    )}
-                  </div>
-                  <span className="donation-amount">+${donation.amount}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
-  )
-}
 
 export default IndexPopup
