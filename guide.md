@@ -1,8 +1,7 @@
-Now i have the front end for donator to donate to the streamer. I want the streamer to have access to the messages sent by the donator. PLease create backend using express js in backend file. What the backend can do. Basically when donator send the message to the streamer. It will save the message in json format in backend. Then create another separate website where streamer can fetch the json file.
+now every donator can donate to the streamer. But there are possibility that the donator will send unappropriate message to the streamer. So i need to use open ai to analyze the message and make the warning if the message content is unappropriate. 
 
-1. Create backend to store the the message from donator in json file format.
-2. the backend will save the data
-3. Create separate website for the streamer that can fetch the json file from the backend
-4. use express js for the backend
-5. use tailwind for the style
-6. Keep all the existing feature and functions. Dont remove them
+Task
+1. use open ai to analyze the message
+2. when donator click donate. Ai will first check whether the message is clean or not. If the message is unappropriate, it will show warning when donator click donate.
+3. then after user change their message to be better, only then the message successfully stored in donations.json
+4. i will set the open ai api key in env

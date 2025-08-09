@@ -192,9 +192,62 @@ function DonationPage({
   const [donationAmount, setDonationAmount] = useState<string>("")
   const [message, setMessage] = useState("")
   const [showSuccess, setShowSuccess] = useState(false)
+  const [showWarning, setShowWarning] = useState(false)
+  const [warningReason, setWarningReason] = useState("")
+  const [forceSubmit, setForceSubmit] = useState(false)
+
+  // Function to validate message content
+  const validateMessage = async (messageText: string) => {
+    try {
+      if (!messageText || messageText.trim().length === 0) {
+        return { isValid: true, reason: "" }
+      }
+
+      const response = await fetch('http://localhost:3001/api/validate-message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: messageText })
+      })
+
+      if (!response.ok) {
+        console.error('Server error during validation:', response.status)
+        return { isValid: true, reason: "" } // Allow submission on server error
+      }
+
+      const result = await response.json()
+
+      if (!result.success) {
+        console.error('API error during validation:', result.error)
+        return { isValid: true, reason: "" } // Allow submission on API error
+      }
+
+      return {
+        isValid: result.isAppropriate,
+        reason: result.reason || ""
+      }
+    } catch (error) {
+      console.error('Error validating message:', error)
+      return { isValid: true, reason: "" } // Allow submission on network error
+    }
+  }
 
   const handleDonate = async () => {
     if (!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0) return
+
+    // Validate message content first (unless forcing submission)
+    if (message && message.trim().length > 0 && !forceSubmit) {
+      const validation = await validateMessage(message)
+      if (!validation.isValid) {
+        setWarningReason(validation.reason)
+        setShowWarning(true)
+        return // Stop submission if message is inappropriate
+      }
+    }
+
+    // Hide warning if message is appropriate
+    setShowWarning(false)
 
     try {
       // Send donation data to backend
@@ -222,9 +275,15 @@ function DonationPage({
         setShowSuccess(true)
         setTimeout(() => setShowSuccess(false), 3000)
 
-        // Reset form
+        // Reset form and warning states
         setDonationAmount("")
         setMessage("")
+        setShowWarning(false)
+        setForceSubmit(false)
+      } else if (result.isContentViolation) {
+        // Handle content violation from server-side validation
+        setWarningReason(result.reason || 'Message contains inappropriate content')
+        setShowWarning(true)
       } else {
         console.error('Failed to save donation:', result.error)
         // Still show success to user since the "donation" was processed
@@ -232,6 +291,8 @@ function DonationPage({
         setTimeout(() => setShowSuccess(false), 3000)
         setDonationAmount("")
         setMessage("")
+        setShowWarning(false)
+        setForceSubmit(false)
       }
     } catch (error) {
       console.error('Error sending donation to backend:', error)
@@ -240,7 +301,22 @@ function DonationPage({
       setTimeout(() => setShowSuccess(false), 3000)
       setDonationAmount("")
       setMessage("")
+      setShowWarning(false)
+      setForceSubmit(false)
     }
+  }
+
+  // Function to handle "Proceed Anyway" button
+  const handleProceedAnyway = () => {
+    setForceSubmit(true)
+    setShowWarning(false)
+    handleDonate()
+  }
+
+  // Function to handle "Revise Message" button
+  const handleReviseMessage = () => {
+    setShowWarning(false)
+    setForceSubmit(false)
   }
 
   if (showSuccess) {
@@ -299,6 +375,41 @@ function DonationPage({
             <div className="gradient-red text-white px-3 py-1.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide shadow-md">
               <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse-slow"></span>
               <span>LIVE</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Content Warning */}
+      {showWarning && (
+        <div className="mb-4">
+          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-0.5">
+                <svg className="h-5 w-5 text-yellow-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-yellow-800 mb-1">Message Content Warning</h3>
+                <p className="text-sm text-yellow-700 mb-3">
+                  {warningReason || "Your message may contain inappropriate content. Please revise your message before donating."}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleProceedAnyway}
+                    className="bg-yellow-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-yellow-700 transition-colors"
+                  >
+                    Proceed Anyway
+                  </button>
+                  <button
+                    onClick={handleReviseMessage}
+                    className="bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-gray-700 transition-colors"
+                  >
+                    Revise Message
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

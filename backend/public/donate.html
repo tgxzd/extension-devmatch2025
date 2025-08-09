@@ -49,8 +49,35 @@
                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
             </div>
             
+            <!-- Content Warning -->
+            <div id="contentWarning" class="mb-4 hidden">
+                <div class="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-yellow-800">Message Content Warning</h3>
+                            <div class="mt-2 text-sm text-yellow-700">
+                                <p id="warningMessage">Your message may contain inappropriate content. Please revise your message before donating.</p>
+                            </div>
+                            <div class="mt-3">
+                                <button onclick="proceedAnyway()" class="bg-yellow-600 text-white px-3 py-1 rounded text-sm hover:bg-yellow-700 mr-2">
+                                    Proceed Anyway
+                                </button>
+                                <button onclick="hideWarning()" class="bg-gray-600 text-white px-3 py-1 rounded text-sm hover:bg-gray-700">
+                                    Revise Message
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Submit Button -->
-            <button onclick="submitDonation()" 
+            <button onclick="submitDonation()" id="submitBtn"
                     class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors">
                 🎉 Send Donation
             </button>
@@ -61,6 +88,8 @@
     </div>
 
     <script>
+        let forceSubmit = false;
+
         async function submitDonation() {
             const streamerName = document.getElementById('streamerName').value.trim();
             const platform = document.getElementById('platform').value;
@@ -80,6 +109,14 @@
             if (!amount || amount <= 0) {
                 showStatus('Please enter a valid amount', 'error');
                 return;
+            }
+            
+            // Check message content first (unless forcing submission)
+            if (message && message.trim().length > 0 && !forceSubmit) {
+                const isValid = await validateMessage(message);
+                if (!isValid) {
+                    return; // Stop submission if message is inappropriate
+                }
             }
             
             try {
@@ -104,10 +141,14 @@
                 
                 if (result.success) {
                     showStatus('🎉 Donation sent successfully! Thank you!', 'success');
-                    // Reset form
+                    // Reset form and flags
                     document.getElementById('amount').value = '';
                     document.getElementById('message').value = '';
                     document.getElementById('donorName').value = '';
+                    hideWarning();
+                    forceSubmit = false;
+                } else if (result.isContentViolation) {
+                    showContentWarning(result.reason || 'Message contains inappropriate content');
                 } else {
                     showStatus('Failed to send donation: ' + result.error, 'error');
                 }
@@ -115,6 +156,67 @@
                 console.error('Error:', error);
                 showStatus('Failed to connect to server. Please try again.', 'error');
             }
+        }
+
+        async function validateMessage(message) {
+            try {
+                const response = await fetch('/api/validate-message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message })
+                });
+                
+                if (!response.ok) {
+                    console.error('Server error during validation:', response.status, response.statusText);
+                    return true; // Allow submission on server error
+                }
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    console.error('API error during validation:', result.error);
+                    return true; // Allow submission on API error
+                }
+                
+                if (!result.isAppropriate) {
+                    showContentWarning(result.reason || 'Message may contain inappropriate content');
+                    return false;
+                }
+                
+                hideWarning();
+                return true;
+            } catch (error) {
+                console.error('Network error validating message:', error);
+                // If validation fails, allow submission but show warning
+                return true;
+            }
+        }
+
+        function showContentWarning(reason) {
+            const warningDiv = document.getElementById('contentWarning');
+            const warningMessage = document.getElementById('warningMessage');
+            
+            if (!warningDiv || !warningMessage) {
+                console.error('Warning elements not found');
+                return;
+            }
+            
+            warningMessage.textContent = reason;
+            warningDiv.classList.remove('hidden');
+        }
+
+        function hideWarning() {
+            const warningDiv = document.getElementById('contentWarning');
+            warningDiv.classList.add('hidden');
+            forceSubmit = false;
+        }
+
+        function proceedAnyway() {
+            forceSubmit = true;
+            hideWarning();
+            submitDonation();
         }
         
         function showStatus(message, type) {

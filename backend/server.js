@@ -3,9 +3,16 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const fs = require('fs').promises;
 const path = require('path');
+require('dotenv').config();
+const OpenAI = require('openai');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Middleware
 app.use(cors());
@@ -55,11 +62,92 @@ async function saveDonations(donations) {
   }
 }
 
+// Analyze message content using OpenAI
+async function analyzeMessageContent(message) {
+  try {
+    if (!message || message.trim().length === 0) {
+      return { isAppropriate: true, reason: '' };
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('OpenAI API key not configured, skipping content analysis');
+      return { isAppropriate: true, reason: '' };
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: `You are a content moderator for streaming donations. Analyze the following message and determine if it contains inappropriate content such as:
+          - Hate speech, harassment, or bullying
+          - Sexual or explicit content
+          - Spam or excessive promotional content
+          - Threats or violence
+          - Offensive language or slurs
+          - Content that could be harmful to streamers or viewers
+          
+          Respond with JSON format: {"appropriate": true/false, "reason": "brief explanation if inappropriate"}
+          Be strict but fair in your assessment.`
+        },
+        {
+          role: "user",
+          content: message
+        }
+      ],
+      max_tokens: 100,
+      temperature: 0.1
+    });
+
+    const response = completion.choices[0].message.content;
+    const analysis = JSON.parse(response);
+    
+    return {
+      isAppropriate: analysis.appropriate,
+      reason: analysis.reason || ''
+    };
+  } catch (error) {
+    console.error('Error analyzing message content:', error);
+    // If AI analysis fails, allow the message through but log the error
+    return { isAppropriate: true, reason: 'Analysis service unavailable' };
+  }
+}
+
 // API Routes
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'DonateStream Backend is running' });
+});
+
+// Content validation endpoint
+app.post('/api/validate-message', async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ 
+        error: 'Message is required for validation' 
+      });
+    }
+
+    const analysis = await analyzeMessageContent(message);
+
+    res.json({
+      success: true,
+      isAppropriate: analysis.isAppropriate,
+      reason: analysis.reason,
+      message: analysis.isAppropriate 
+        ? 'Message is appropriate' 
+        : 'Message contains inappropriate content'
+    });
+
+  } catch (error) {
+    console.error('Error validating message:', error);
+    res.status(500).json({ 
+      error: 'Internal server error during message validation' 
+    });
+  }
 });
 
 // POST endpoint to receive donations
@@ -79,6 +167,19 @@ app.post('/api/donations', async (req, res) => {
       return res.status(400).json({ 
         error: 'Missing required fields: streamerName and amount are required' 
       });
+    }
+
+    // Validate message content using OpenAI
+    if (message && message.trim().length > 0) {
+      const contentAnalysis = await analyzeMessageContent(message);
+      
+      if (!contentAnalysis.isAppropriate) {
+        return res.status(400).json({
+          error: 'Message contains inappropriate content',
+          reason: contentAnalysis.reason,
+          isContentViolation: true
+        });
+      }
     }
 
     // Load existing donations
@@ -282,6 +383,8 @@ app.get('/donate', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'donate.html'));
 });
 
+
+
 // Default route
 app.get('/', (req, res) => {
   res.json({
@@ -289,6 +392,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       health: 'GET /api/health',
+      validateMessage: 'POST /api/validate-message',
       donations: {
         create: 'POST /api/donations',
         getAll: 'GET /api/donations',
