@@ -245,7 +245,9 @@ function IndexPopup() {
 
   // Function to handle wallet connection and tab detection
   const handleWalletConnect = async () => {
-    await setupWallet()
+    // Check if there's a stored private key first
+    const storedPrivateKey = await loadPrivateKey()
+    await setupWallet(storedPrivateKey || undefined)
     
     // Get current tab info after wallet connection
     const tabInfo = await getCurrentTab()
