@@ -106,25 +106,29 @@ function IndexPopup() {
   }, [])
 
   return (
-    <div className="app-container">
+    <div className="w-96 h-[600px] gradient-primary flex flex-col overflow-hidden relative shadow-2xl">
+      {/* Glass overlay */}
+      <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-white/5 pointer-events-none"></div>
+      
       {/* Header */}
-      <header className="app-header">
-        <div className="header-content">
-          <div className="logo">
-            <span className="logo-icon">🎁</span>
-            <span className="logo-text">DonateStream</span>
+      <header className="glass-effect p-5 relative z-10">
+        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"></div>
+        <div className="flex justify-between items-center text-white">
+          <div className="flex items-center gap-2">
+            <span className="text-3xl drop-shadow-md">🎁</span>
+            <span className="text-xl font-bold tracking-tight text-shadow-md">DonateStream</span>
           </div>
           {isWalletConnected && (
-            <div className="balance-display">
-              <span className="balance-label">Balance</span>
-              <span className="balance-amount">${balance} USDC</span>
+            <div className="glass-effect px-3 py-2 rounded-xl">
+              <div className="text-xs uppercase tracking-wide opacity-90 mb-0.5">Balance</div>
+              <div className="text-base font-bold text-shadow-sm">${balance} USDC</div>
             </div>
           )}
         </div>
       </header>
 
       {/* Page Content */}
-      <main className="page-content">
+      <main className="flex-1 bg-white rounded-t-3xl mt-2 overflow-y-auto relative z-10">
         {!isWalletConnected ? (
           <WalletConnection onConnect={handleWalletConnect} />
         ) : (
@@ -134,8 +138,6 @@ function IndexPopup() {
           />
         )}
       </main>
-
-
     </div>
   )
 }
@@ -145,25 +147,34 @@ function IndexPopup() {
 // Wallet Connection Component
 function WalletConnection({ onConnect }: { onConnect: () => void }) {
   return (
-    <div className="page wallet-connection">
-      <div className="connection-section">
-        <div className="wallet-icon">🔗</div>
-        <h2>Connect Your Wallet</h2>
-        <p>Connect your wallet to start donating to streamers with USDC</p>
+    <div className="flex items-center justify-center min-h-full p-5">
+      <div className="text-center max-w-sm">
+        <div className="text-6xl mb-6">🔗</div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-3">Connect Your Wallet</h2>
+        <p className="text-gray-600 mb-6 leading-relaxed">
+          Connect your wallet to start donating to streamers with USDC
+        </p>
 
-        <div className="network-info">
-          <span className="network-badge">Coinbase Circle Testnet</span>
-          <p className="network-desc">Using USDC on Circle testnet for secure donations</p>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <span className="inline-block bg-blue-500 text-white px-3 py-1 rounded-full text-xs font-semibold mb-2">
+            Coinbase Circle Testnet
+          </span>
+          <p className="text-blue-800 text-sm">
+            Using USDC on Circle testnet for secure donations
+          </p>
         </div>
 
-        <button className="connect-btn" onClick={onConnect}>
-          <span className="btn-icon">👛</span>
+        <button 
+          className="gradient-primary text-white px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 w-full mb-4 btn-hover shimmer-effect shadow-primary"
+          onClick={onConnect}
+        >
+          <span className="text-lg">👛</span>
           Connect Wallet
         </button>
 
-        <div className="security-note">
-          <span className="security-icon">🔒</span>
-          <p>Your wallet connection is secure and encrypted</p>
+        <div className="flex items-center justify-center gap-2 opacity-70">
+          <span className="text-sm">🔒</span>
+          <p className="text-xs text-gray-600">Your wallet connection is secure and encrypted</p>
         </div>
       </div>
     </div>
@@ -178,118 +189,144 @@ function DonationPage({
   detectedStreamer: { name: string, platform: string } | null,
   currentTab: { url: string, title: string }
 }) {
-  const [selectedAmount, setSelectedAmount] = useState<string>("")
+  const [donationAmount, setDonationAmount] = useState<string>("")
   const [message, setMessage] = useState("")
   const [showSuccess, setShowSuccess] = useState(false)
 
-  const donationOptions = [
-    { emoji: "☕", amount: "0.1", label: "Coffee" },
-    { emoji: "🍕", amount: "0.5", label: "Slice" },
-    { emoji: "🍔", amount: "1", label: "Burger" },
-    { emoji: "🎉", amount: "5", label: "Party" }
-  ]
-
   const handleDonate = () => {
-    if (!selectedAmount || !detectedStreamer) return
+    if (!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0) return
 
     // Simulate donation
     setShowSuccess(true)
     setTimeout(() => setShowSuccess(false), 3000)
 
     // Reset form
-    setSelectedAmount("")
+    setDonationAmount("")
     setMessage("")
   }
 
   if (showSuccess) {
     return (
-      <div className="page success-page">
-        <div className="success-animation">
-          <div className="success-icon">🎉</div>
-          <h2>Donation Sent!</h2>
-          <p>Your ${selectedAmount} USDC donation was sent to {detectedStreamer?.name}</p>
-          <div className="success-message">
-            {message && (
-              <div className="message-preview">
-                <span className="message-label">Your message:</span>
-                <span className="message-text">"{message}"</span>
-              </div>
-            )}
-          </div>
+      <div className="flex items-center justify-center min-h-full text-center p-5">
+        <div className="max-w-sm">
+          <div className="text-7xl mb-6 animate-bounce-light">🎉</div>
+          <h2 className="text-2xl font-bold text-green-600 mb-3">Donation Sent!</h2>
+          <p className="text-gray-600 mb-4">
+            Your ${donationAmount} USDC donation was sent to {detectedStreamer?.name}
+          </p>
+          {message && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4 mt-4">
+              <span className="block text-xs font-semibold text-green-600 mb-1">Your message:</span>
+              <span className="text-green-800 italic">"{message}"</span>
+            </div>
+          )}
         </div>
       </div>
     )
   }
 
   return (
-    <div className="page donation-page">
+    <div className="p-5">
       {/* Current Tab Info */}
-      <div className="tab-info">
-        <div className="tab-url">
-          <span className="url-label">Current page:</span>
-          <span className="url-text">{currentTab.url}</span>
+      <div className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-2xl p-4 mb-5 relative overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+        <div className="mb-2">
+          <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Current page:</span>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 mt-1.5">
+            <span className="text-xs text-gray-600 font-mono break-all">{currentTab.url}</span>
+          </div>
         </div>
         {currentTab.title && (
-          <div className="tab-title">
-            <span className="title-text">{currentTab.title}</span>
+          <div className="mt-1">
+            <span className="text-sm text-gray-700 font-medium leading-relaxed">{currentTab.title}</span>
           </div>
         )}
       </div>
 
       {detectedStreamer && (
-        <div className="streamer-section">
-          <div className="streamer-card">
-            <div className="streamer-avatar">
+        <div className="mb-6">
+          <div className="bg-gradient-to-br from-white to-gray-50 border-2 border-gray-200 rounded-2xl p-5 flex items-center gap-4 shadow-glass card-hover overflow-hidden relative">
+            <div className="absolute top-0 left-0 right-0 h-1 gradient-green"></div>
+            <div className="w-14 h-14 rounded-full gradient-primary flex items-center justify-center text-white font-bold text-xl shadow-lg border-3 border-white relative">
               <span>{detectedStreamer.name.charAt(0).toUpperCase()}</span>
             </div>
-            <div className="streamer-info">
-              <h3>{detectedStreamer.name}</h3>
-              <span className="platform-badge">{detectedStreamer.platform}</span>
+            <div className="flex-1">
+              <h3 className="text-lg font-bold text-gray-900 mb-1.5 leading-tight">
+                {detectedStreamer.name}
+              </h3>
+              <span className="gradient-blue text-white px-3 py-1 rounded-xl text-xs font-bold uppercase tracking-wide shadow-md">
+                {detectedStreamer.platform}
+              </span>
             </div>
-            <div className="live-indicator">
-              <span className="live-dot"></span>
+            <div className="gradient-red text-white px-3 py-1.5 rounded-2xl flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide shadow-md">
+              <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse-slow"></span>
               <span>LIVE</span>
             </div>
           </div>
         </div>
       )}
 
-      <div className="donation-section">
-        <h3>Choose donation amount</h3>
+      <div className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-2xl p-5">
+        <h3 className="text-xl font-bold text-gray-900 mb-5 text-center relative pb-3">
+          Enter donation amount
+          <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-15 h-0.5 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full"></div>
+        </h3>
 
-        <div className="donation-grid">
-          {donationOptions.map((option) => (
-            <button
-              key={option.amount}
-              className={`donation-option ${selectedAmount === option.amount ? "selected" : ""}`}
-              onClick={() => setSelectedAmount(option.amount)}
-            >
-              <span className="option-emoji">{option.emoji}</span>
-              <span className="option-amount">${option.amount}</span>
-              <span className="option-label">{option.label}</span>
-            </button>
-          ))}
+        <div className="mb-5">
+          <label htmlFor="donation-amount" className="block font-semibold text-gray-700 text-sm mb-3">
+            Amount in USDC
+          </label>
+          <div className="relative mb-3">
+            <span className="absolute left-5 top-1/2 transform -translate-y-1/2 font-bold text-indigo-600 text-base z-10 pointer-events-none">$</span>
+            <input
+              id="donation-amount"
+              type="number"
+              step="0.01"
+              min="0.01"
+              placeholder="0.00"
+              value={donationAmount}
+              onChange={(e) => setDonationAmount(e.target.value)}
+              className="w-full pl-12 pr-20 py-4.5 border-2 border-gray-200 rounded-2xl text-xl font-bold bg-white shadow-glass input-focus transition-all duration-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+            <span className="absolute right-3 top-1/2 transform -translate-y-1/2 gradient-primary text-white px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide shadow-md pointer-events-none">
+              USDC
+            </span>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-glass">
+            <span className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Quick amounts:</span>
+            <div className="grid grid-cols-4 gap-2">
+              {["1", "5", "10", "25"].map((amount) => (
+                <button
+                  key={amount}
+                  className="p-3 border-2 border-gray-200 rounded-xl bg-white font-semibold text-gray-700 transition-all duration-300 relative overflow-hidden btn-hover hover:border-indigo-500 hover:bg-gradient-to-br hover:from-gray-50 hover:to-gray-100 hover:text-indigo-600 hover:shadow-md before:absolute before:top-0 before:left-0 before:right-0 before:h-0.5 before:bg-gray-200 before:transition-all before:duration-300 hover:before:bg-gradient-to-r hover:before:from-indigo-500 hover:before:to-purple-500"
+                  onClick={() => setDonationAmount(amount)}
+                >
+                  ${amount}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
-        <div className="message-section">
-          <label>Add a message (optional)</label>
+        <div className="mb-5">
+          <label className="block font-semibold text-gray-700 text-sm mb-2">Add a message (optional)</label>
           <textarea
             placeholder="Say something nice to the streamer..."
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            className="message-textarea"
+            className="w-full p-4 border-2 border-gray-200 rounded-2xl text-sm bg-white shadow-glass resize-vertical min-h-[80px] input-focus transition-all duration-300"
             maxLength={150}
           />
-          <span className="char-count">{message.length}/150</span>
+          <span className="block text-xs text-gray-500 text-right mt-1">{message.length}/150</span>
         </div>
 
         <button
-          className="donate-btn"
+          className="gradient-green text-white px-6 py-4.5 rounded-2xl font-bold flex items-center justify-center gap-2.5 w-full transition-all duration-300 relative overflow-hidden shadow-primary-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none btn-hover shimmer-effect uppercase tracking-wide"
           onClick={handleDonate}
-          disabled={!selectedAmount || !detectedStreamer}
+          disabled={!donationAmount || !detectedStreamer || parseFloat(donationAmount) <= 0}
         >
-          <span className="btn-icon">💝</span>
-          Donate ${selectedAmount} USDC
+          <span className="text-lg">💝</span>
+          {donationAmount && parseFloat(donationAmount) > 0 ? `Donate $${donationAmount} USDC` : 'Enter Amount to Donate'}
         </button>
       </div>
     </div>
