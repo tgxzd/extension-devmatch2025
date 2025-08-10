@@ -46,27 +46,58 @@ function IndexPopup() {
       clearInterval(validationInterval)
     }
 
+    // Define validation function to avoid stale closures
+    const performValidation = async () => {
+      if (!wallet) {
+        console.error('Wallet not connected during validation')
+        return false
+      }
+      
+      try {
+        const contract = new Contract(contractAddress, ABI.abi, wallet)
+        const lowercaseUsername = streamer.name.toLowerCase()
+        const lowercasePlatform = streamer.platform.toLowerCase()
+        const exists = await contract.contentExistsCheck(lowercaseUsername, lowercasePlatform)
+        console.log(`Content exists check for ${lowercaseUsername} on ${lowercasePlatform}:`, exists)
+        return exists
+      } catch (error: any) {
+        console.error("Failed to check content exists:", error)
+        return false
+      }
+    }
+
     // Initial check
-    checkContentExists(streamer.name, streamer.platform).then(exists => {
+    performValidation().then(exists => {
       setContentValidated(exists)
       console.log(`Auto-validation: ${streamer.name} on ${streamer.platform} - ${exists ? 'Found' : 'Not found'}`)
-    })
-
-    // Set up interval to check every 10 seconds
-    const interval = setInterval(async () => {
-      if (wallet) {
+      
+      // If content is verified, no need to keep checking
+      if (exists) {
+        console.log(`✅ Content verified for ${streamer.name} - stopping auto-validation`)
+        return
+      }
+      
+      // Only set up interval if content is not yet verified
+      const interval = setInterval(async () => {
         try {
-          const exists = await checkContentExists(streamer.name, streamer.platform)
+          const exists = await performValidation()
           setContentValidated(exists)
           console.log(`Auto-validation (10s): ${streamer.name} on ${streamer.platform} - ${exists ? 'Found' : 'Not found'}`)
+          
+          // Stop checking once verified
+          if (exists) {
+            console.log(`✅ Content verified for ${streamer.name} - stopping auto-validation`)
+            clearInterval(interval)
+            setValidationInterval(null)
+          }
         } catch (error) {
           console.error('Auto-validation error:', error)
         }
-      }
-    }, 10000) // 10 seconds
+      }, 10000) // 10 seconds
 
-    setValidationInterval(interval)
-  }, [validationInterval, wallet, checkContentExists])
+      setValidationInterval(interval)
+    })
+  }, [validationInterval, wallet, contractAddress])
 
   // Function to stop automatic validation checking
   const stopAutoValidation = React.useCallback(() => {
@@ -283,6 +314,8 @@ function IndexPopup() {
         platform: "YouTube"
       }
       
+      // Stop existing validation before setting new streamer
+      stopAutoValidation()
       setDetectedStreamer(streamer)
       setContentValidated(null) // Reset content validation for new streamer
       
@@ -305,6 +338,8 @@ function IndexPopup() {
           platform: "Twitch"
         }
         
+        // Stop existing validation before setting new streamer
+        stopAutoValidation()
         setDetectedStreamer(streamer)
         setContentValidated(null) // Reset content validation for new streamer
         
@@ -351,7 +386,7 @@ function IndexPopup() {
     if (wallet && detectedStreamer && !validationInterval) {
       startAutoValidation(detectedStreamer)
     }
-  }, [wallet, detectedStreamer, validationInterval, startAutoValidation, checkContentExists])
+  }, [wallet, detectedStreamer, validationInterval, startAutoValidation])
 
   // Cleanup interval on component unmount
   useEffect(() => {
@@ -413,6 +448,8 @@ function IndexPopup() {
             setContentValidated={setContentValidated}
             checkContentExists={checkContentExists}
             validationInterval={validationInterval}
+            startAutoValidation={startAutoValidation}
+            stopAutoValidation={stopAutoValidation}
           />
         )}
       </main>
@@ -578,7 +615,9 @@ function DonationPage({
   contentValidated,
   setContentValidated,
   checkContentExists,
-  validationInterval
+  validationInterval,
+  startAutoValidation,
+  stopAutoValidation
 }: {
   detectedStreamer: { name: string, platform: string } | null,
   currentTab: { url: string, title: string },
@@ -590,7 +629,9 @@ function DonationPage({
   contentValidated: boolean | null,
   setContentValidated: (value: boolean | null) => void,
   checkContentExists: (username: string, platform: string) => Promise<boolean>,
-  validationInterval: NodeJS.Timeout | null
+  validationInterval: NodeJS.Timeout | null,
+  startAutoValidation: (streamer: { name: string, platform: string }) => void,
+  stopAutoValidation: () => void
 }) {
   const [donationAmount, setDonationAmount] = useState<string>("")
   const [message, setMessage] = useState("")
@@ -1115,24 +1156,39 @@ function DonationPage({
                 ? 'bg-red-100 text-red-700 hover:bg-red-200'
                 : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
             }`}
-            onClick={() => checkContentExists(detectedStreamer.name, detectedStreamer.platform).then(exists => {
-              setContentValidated(exists)
-              if (exists) {
-                setStatusMessage(`✅ ${detectedStreamer.name} is registered on ${detectedStreamer.platform}`)
-              } else {
-                setStatusMessage(`❌ ${detectedStreamer.name} is not registered on ${detectedStreamer.platform}`)
+            onClick={async () => {
+              try {
+                const exists = await checkContentExists(detectedStreamer.name, detectedStreamer.platform)
+                setContentValidated(exists)
+                if (exists) {
+                  setStatusMessage(`✅ ${detectedStreamer.name} is registered on ${detectedStreamer.platform}`)
+                  // Stop auto-validation if it was running, since we're now verified
+                  if (validationInterval) {
+                    stopAutoValidation()
+                  }
+                } else {
+                  setStatusMessage(`❌ ${detectedStreamer.name} is not registered on ${detectedStreamer.platform}`)
+                  // Start auto-validation if not already running and wallet is connected
+                  if (!validationInterval && wallet) {
+                    startAutoValidation(detectedStreamer)
+                  }
+                }
+              } catch (error) {
+                console.error('Manual verification error:', error)
+                setStatusMessage(`❌ Failed to verify ${detectedStreamer.name}`)
+                setContentValidated(false)
               }
-            })}
+            }}
             disabled={loading}
           >
             <span className="text-sm">
               {contentValidated === true ? '✅' : contentValidated === false ? '❌' : '🔍'}
             </span>
             {contentValidated === true 
-              ? `${detectedStreamer.name} is Verified${validationInterval ? ' (Auto-checking)' : ''}` 
+              ? `${detectedStreamer.name} is Verified ✅` 
               : contentValidated === false 
-              ? `${detectedStreamer.name} Not Found${validationInterval ? ' (Auto-checking)' : ''}`
-              : `Verify ${detectedStreamer.name} is Registered${validationInterval ? ' (Auto-checking)' : ''}`
+              ? `${detectedStreamer.name} Not Found${validationInterval ? ' (Auto-checking...)' : ''}`
+              : `Verify ${detectedStreamer.name} is Registered${validationInterval ? ' (Auto-checking...)' : ''}`
             }
           </button>
         )}
