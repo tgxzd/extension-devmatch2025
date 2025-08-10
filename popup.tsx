@@ -539,7 +539,7 @@ function DonationPage({
   }
 
   // USDC donation function with proper approval flow
-  async function donateUSDC(contentUrl: string, amount: string) {
+  async function donateUSDC(username: string, platform: string, amount: string) {
     if (!wallet) {
       setStatusMessage('Please connect your wallet first!')
       return
@@ -611,8 +611,12 @@ function DonationPage({
       setStatusMessage('Making USDC donation...')
       
       const contract = new Contract(contractAddress, ABI.abi, wallet)
+      // Convert parameters to lowercase for smart contract compatibility
+      const lowercaseUsername = username.toLowerCase()
+      const lowercasePlatform = platform.toLowerCase()
       const donateTx = await contract.donateTokenToContent(
-        contentUrl,
+        lowercaseUsername,
+        lowercasePlatform,
         usdcAddress,
         amountInWei
       )
@@ -649,8 +653,11 @@ function DonationPage({
     
     try {
       const contract = new Contract(contractAddress, ABI.abi, wallet)
-      const exists = await contract.contentExistsCheck(username, platform)
-      console.log(`Content exists check for ${username} on ${platform}:`, exists)
+      // Convert parameters to lowercase for smart contract compatibility
+      const lowercaseUsername = username.toLowerCase()
+      const lowercasePlatform = platform.toLowerCase()
+      const exists = await contract.contentExistsCheck(lowercaseUsername, lowercasePlatform)
+      console.log(`Content exists check for ${lowercaseUsername} on ${lowercasePlatform}:`, exists)
       return exists
     } catch (error: any) {
       console.error("Failed to check content exists:", error)
@@ -717,9 +724,8 @@ function DonationPage({
     try {
       const amount = parseFloat(donationAmount)
       
-      // Use the new donateUSDC function with proper content URL
-      const contentUrl = currentTab.url
-      const txHash = await donateUSDC(contentUrl, amount.toString())
+      // Use the new donateUSDC function with proper username and platform
+      const txHash = await donateUSDC(detectedStreamer.name, detectedStreamer.platform, amount.toString())
 
       console.log('Transaction confirmed with hash:', txHash)
       setTxHash(txHash || "")
@@ -737,7 +743,7 @@ function DonationPage({
         timestamp: new Date().toISOString(),
         txHash: txHash || "",
         walletAddress: wallet.address,
-        contentUrl: contentUrl
+        contentUrl: currentTab.url
       }
 
       // Try to save to backend (non-blocking)
