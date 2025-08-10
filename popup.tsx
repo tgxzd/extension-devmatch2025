@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import "./style.css"
 import ABI from "./abi.json"
 import { ethers, Wallet, JsonRpcProvider, Contract, formatUnits, parseUnits } from "ethers"
@@ -12,10 +12,70 @@ function IndexPopup() {
   const [detectedStreamer, setDetectedStreamer] = useState<{ name: string, platform: string } | null>(null)
   const [wallet, setWallet] = useState<Wallet | null>(null)
   const [contentValidated, setContentValidated] = useState<boolean | null>(null)
+  const [validationInterval, setValidationInterval] = useState<NodeJS.Timeout | null>(null)
 
   const contractAddress = "0x39266942a0F29C6a3495e43fCaE510C0a454B1d9"
   const usdcAddress = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" // Circle USDC on Base Sepolia
-  const rpcUrl = "https://sepolia.base.org" // Base Sepolia testnet
+  const rpcUrl = "https://base-sepolia.g.alchemy.com/v2/7z_rnkKFONf8r6Adr1poXg1qugZlhclq" // Base Sepolia testnet
+
+  // Function to check if content exists on the smart contract
+  const checkContentExists = React.useCallback(async (username: string, platform: string): Promise<boolean> => {
+    if (!wallet) {
+      console.error('Wallet not connected')
+      return false
+    }
+    
+    try {
+      const contract = new Contract(contractAddress, ABI.abi, wallet)
+      // Convert parameters to lowercase for smart contract compatibility
+      const lowercaseUsername = username.toLowerCase()
+      const lowercasePlatform = platform.toLowerCase()
+      const exists = await contract.contentExistsCheck(lowercaseUsername, lowercasePlatform)
+      console.log(`Content exists check for ${lowercaseUsername} on ${lowercasePlatform}:`, exists)
+      return exists
+    } catch (error: any) {
+      console.error("Failed to check content exists:", error)
+      return false
+    }
+  }, [wallet])
+
+  // Function to start automatic validation checking
+  const startAutoValidation = React.useCallback((streamer: { name: string, platform: string }) => {
+    // Clear any existing interval
+    if (validationInterval) {
+      clearInterval(validationInterval)
+    }
+
+    // Initial check
+    checkContentExists(streamer.name, streamer.platform).then(exists => {
+      setContentValidated(exists)
+      console.log(`Auto-validation: ${streamer.name} on ${streamer.platform} - ${exists ? 'Found' : 'Not found'}`)
+    })
+
+    // Set up interval to check every 10 seconds
+    const interval = setInterval(async () => {
+      if (wallet) {
+        try {
+          const exists = await checkContentExists(streamer.name, streamer.platform)
+          setContentValidated(exists)
+          console.log(`Auto-validation (10s): ${streamer.name} on ${streamer.platform} - ${exists ? 'Found' : 'Not found'}`)
+        } catch (error) {
+          console.error('Auto-validation error:', error)
+        }
+      }
+    }, 10000) // 10 seconds
+
+    setValidationInterval(interval)
+  }, [validationInterval, wallet, checkContentExists])
+
+  // Function to stop automatic validation checking
+  const stopAutoValidation = React.useCallback(() => {
+    if (validationInterval) {
+      clearInterval(validationInterval)
+      setValidationInterval(null)
+      console.log('Auto-validation stopped')
+    }
+  }, [validationInterval])
 
   // Wallet management functions
   const generateWallet = () => {
@@ -145,6 +205,9 @@ function IndexPopup() {
       setContentValidated(null)
       setCurrentTab({ url: "", title: "" })
       
+      // Stop auto-validation
+      stopAutoValidation()
+      
       console.log('Successfully logged out')
     } catch (error) {
       console.error('Error during logout:', error)
@@ -204,6 +267,7 @@ function IndexPopup() {
     if (!tab.url || tab.url === "No tab detected" || tab.url === "Error detecting tab") {
       setDetectedStreamer(null)
       setContentValidated(null) // Reset content validation
+      stopAutoValidation() // Stop any existing auto-validation
       return
     }
 
@@ -214,11 +278,18 @@ function IndexPopup() {
       const channelMatch = title.match(/(.+?)\s*(-|–|—|\||:)/) // Common separators
       const channelName = channelMatch ? channelMatch[1].trim() : title.split(" ")[0]
       
-      setDetectedStreamer({
+      const streamer = {
         name: channelName || "YouTube Creator",
         platform: "YouTube"
-      })
+      }
+      
+      setDetectedStreamer(streamer)
       setContentValidated(null) // Reset content validation for new streamer
+      
+      // Start auto-validation if wallet is connected
+      if (wallet) {
+        startAutoValidation(streamer)
+      }
       return
     }
 
@@ -229,11 +300,18 @@ function IndexPopup() {
       const streamerName = urlMatch ? urlMatch[1] : null
       
       if (streamerName && streamerName !== "directory" && streamerName !== "browse") {
-        setDetectedStreamer({
+        const streamer = {
           name: streamerName,
           platform: "Twitch"
-        })
+        }
+        
+        setDetectedStreamer(streamer)
         setContentValidated(null) // Reset content validation for new streamer
+        
+        // Start auto-validation if wallet is connected
+        if (wallet) {
+          startAutoValidation(streamer)
+        }
         return
       }
     }
@@ -241,6 +319,7 @@ function IndexPopup() {
     // No streamer detected
     setDetectedStreamer(null)
     setContentValidated(null) // Reset content validation
+    stopAutoValidation() // Stop any existing auto-validation
   }
 
   // Function to handle wallet connection and tab detection
@@ -266,6 +345,22 @@ function IndexPopup() {
       }
     })
   }, [])
+
+  // Start auto-validation when wallet becomes available and streamer is detected
+  useEffect(() => {
+    if (wallet && detectedStreamer && !validationInterval) {
+      startAutoValidation(detectedStreamer)
+    }
+  }, [wallet, detectedStreamer, validationInterval, startAutoValidation, checkContentExists])
+
+  // Cleanup interval on component unmount
+  useEffect(() => {
+    return () => {
+      if (validationInterval) {
+        clearInterval(validationInterval)
+      }
+    }
+  }, [validationInterval])
 
   return (
     <div className="w-96 h-[600px] gradient-primary flex flex-col overflow-hidden relative shadow-2xl">
@@ -316,6 +411,8 @@ function IndexPopup() {
             approveUSDC={approveUSDC}
             contentValidated={contentValidated}
             setContentValidated={setContentValidated}
+            checkContentExists={checkContentExists}
+            validationInterval={validationInterval}
           />
         )}
       </main>
@@ -479,7 +576,9 @@ function DonationPage({
   loadBalance,
   approveUSDC,
   contentValidated,
-  setContentValidated
+  setContentValidated,
+  checkContentExists,
+  validationInterval
 }: {
   detectedStreamer: { name: string, platform: string } | null,
   currentTab: { url: string, title: string },
@@ -489,7 +588,9 @@ function DonationPage({
   loadBalance: (walletInstance: Wallet) => Promise<void>,
   approveUSDC: (amount: bigint) => Promise<void>,
   contentValidated: boolean | null,
-  setContentValidated: (value: boolean | null) => void
+  setContentValidated: (value: boolean | null) => void,
+  checkContentExists: (username: string, platform: string) => Promise<boolean>,
+  validationInterval: NodeJS.Timeout | null
 }) {
   const [donationAmount, setDonationAmount] = useState<string>("")
   const [message, setMessage] = useState("")
@@ -641,27 +742,6 @@ function DonationPage({
       throw error
     } finally {
       setLoading(false)
-    }
-  }
-
-  // Function to check if content exists on the smart contract
-  async function checkContentExists(username: string, platform: string): Promise<boolean> {
-    if (!wallet) {
-      console.error('Wallet not connected')
-      return false
-    }
-    
-    try {
-      const contract = new Contract(contractAddress, ABI.abi, wallet)
-      // Convert parameters to lowercase for smart contract compatibility
-      const lowercaseUsername = username.toLowerCase()
-      const lowercasePlatform = platform.toLowerCase()
-      const exists = await contract.contentExistsCheck(lowercaseUsername, lowercasePlatform)
-      console.log(`Content exists check for ${lowercaseUsername} on ${lowercasePlatform}:`, exists)
-      return exists
-    } catch (error: any) {
-      console.error("Failed to check content exists:", error)
-      return false
     }
   }
 
@@ -1049,10 +1129,10 @@ function DonationPage({
               {contentValidated === true ? '✅' : contentValidated === false ? '❌' : '🔍'}
             </span>
             {contentValidated === true 
-              ? `${detectedStreamer.name} is Verified` 
+              ? `${detectedStreamer.name} is Verified${validationInterval ? ' (Auto-checking)' : ''}` 
               : contentValidated === false 
-              ? `${detectedStreamer.name} Not Found`
-              : `Verify ${detectedStreamer.name} is Registered`
+              ? `${detectedStreamer.name} Not Found${validationInterval ? ' (Auto-checking)' : ''}`
+              : `Verify ${detectedStreamer.name} is Registered${validationInterval ? ' (Auto-checking)' : ''}`
             }
           </button>
         )}
